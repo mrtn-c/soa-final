@@ -1,10 +1,8 @@
 //Inicio MQTT.
+import verificarToken from './verificarToken';
 const dotenv = require('dotenv');
 dotenv.config();
 const mqtt = require('mqtt');
-/*const protocol = 'mqtt'
-const host = 'http://192.168.196.37'
-const portMosquitto = '8883'*/
 const clientId = `mqtt_${Math.random().toString(16).slice(3)}`
 
 const connectUrl = `${process.env.HOST}:${process.env.PORT_MOSQUITTO}`
@@ -22,8 +20,6 @@ client.on('connect', () => {
     client.subscribe("/listo");
     client.subscribe("/login/auth");
 })
-
-
 
 
 const jwt = require('jsonwebtoken');
@@ -53,6 +49,7 @@ app.post("/user/login", async (req, res) => {
 
   }catch{
     res.send("Error a publicar en mqtt, intente nuevamente");
+    res.status(409).send("Conflicto");
   }
 
   let nodeRes;
@@ -60,7 +57,7 @@ app.post("/user/login", async (req, res) => {
   try{
     nodeRes = await waitForValidation();
   }catch{
-    res.send("error, usuario no encontrado.");
+    res.status(401).send("Usuario no encontrado, intente nuevamente");
     return;
   }
 
@@ -69,6 +66,7 @@ app.post("/user/login", async (req, res) => {
   bcrypt.compare(req.body.contrasenia, nodeRes.contrasenia, (err, result) => {
     if (err) {
       console.error('Error al comparar las contraseñas:', err);
+      res.status(409).send("Conflicto");
     
     } else if (result) {
       console.log('Las contraseñas coinciden. El usuario puede iniciar sesión.');
@@ -79,6 +77,23 @@ app.post("/user/login", async (req, res) => {
       }
   
       const token = jwt.sign(data, jwtSecretKey);
+      const parametros = {
+        token: token,
+        id: nodeRes.id
+      }
+      try{
+        client.publish("/token", JSON.stringify(parametros), { qos: 0, retain: false }, (error) => {
+          if (error) {
+            console.log(error)
+            console.error(error)
+          }
+        });
+    
+      }catch{
+        res.send("Error a publicar en mqtt, intente nuevamente");
+        res.status(409).send("Conflicto");
+      }
+    
       res.status(200).json(token);
       // Aquí es donde normalmente procederías con la lógica para iniciar sesión o permitir el acceso del usuario
     } else {
@@ -86,9 +101,7 @@ app.post("/user/login", async (req, res) => {
       res.status(404).send("Contraseña incorrecta");
       // Aquí es donde normalmente mostrarías un mensaje de error al usuario o tomarías alguna acción adicional
     }
-  });
-    
-
+  }); //TODO guardar token en bd. Mandar x mqtt y almacenar con ID.    
 });
 
 const waitForValidation = () => {
@@ -102,7 +115,7 @@ const waitForValidation = () => {
           if(response.id !== null){
             resolve(response);
           } else {
-            console.log("entra else?");
+            
             reject();
           }
         }catch (e){
@@ -210,12 +223,6 @@ app.post('/test', async (req, res) => {
 
 
 
-       
-
-
-
-
-
 client.on('message',function(topic, message, packet){
     
     if(topic === '/id/limpiar'){
@@ -236,4 +243,26 @@ client.on('message',function(topic, message, packet){
         
     }
 
+
+
+    
 });
+
+const verificarToken = (req, res, next) => {
+  const token = req.header('Authorization');
+
+  if (!token) {
+    return res.status(401).json({ mensaje: 'Acceso denegado. No se proporcionó un token.' });
+  }
+
+  // Eliminamos el prefijo "Bearer " del token
+  const tokenSinBearer = token.replace('Bearer ', '');
+
+  try {
+    const datosToken = jwt.verify(tokenSinBearer, process.env.JWT_SECRET_KEY); //DEVUELVE ID Y DATE.
+    req.usuario = datosToken; // Si deseas acceder a los datos del usuario autenticado desde las rutas, puedes guardarlos en req.usuario
+    return datosToken;
+  } catch (error) {
+    return res.status(401).json({ mensaje: 'Token inválido.' });
+  }
+};
