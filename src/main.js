@@ -15,9 +15,12 @@ const client = mqtt.connect(connectUrl, {
   
 client.on('connect', () => {
     console.log('Connected')
+    //Limpieza del mensaje recibido de mqtt.
     client.subscribe("/id/limpiar");
     client.subscribe("/listo");
+    //Login
     client.subscribe("/login/auth");
+    //Verificacion, de usuarios no repetidos.
     client.subscribe("/user/register/valid/email");
     client.subscribe("/user/register/valid/usuario");
 })
@@ -26,7 +29,6 @@ client.on('connect', () => {
 const jwt = require('jsonwebtoken');
 const express = require("express");
 const bcrypt = require('bcrypt');
-const bodyParser = require("body-parser");
 
 const app = express()
 
@@ -78,20 +80,6 @@ app.post("/user/login", async (req, res) => {
       }
   
       const token = jwt.sign(data, jwtSecretKey);
-
-      //  CHECK  tengo la funcion verify x lo que no hace falta que guarde en la BD.
-      // try{
-      //   client.publish("/token", JSON.stringify(parametros), { qos: 0, retain: false }, (error) => {
-      //     if (error) {
-      //       console.log(error)
-      //       console.error(error)
-      //     }
-      //   });
-    
-      // }catch{
-      //   res.send("Error a publicar en mqtt, intente nuevamente");
-      //   res.status(409).send("Conflicto");
-      // }
     
       res.status(200).json(token);
       // Aquí es donde normalmente procederías con la lógica para iniciar sesión o permitir el acceso del usuario
@@ -252,7 +240,6 @@ const waitForValidUsuario = () => {
 // Función para validar el formato del email
 async function isValidEmail(email) {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  let valid = false;
   if(emailRegex.test(email)){
     try{
       client.publish("/user/register/check/email", JSON.stringify(email), { qos: 0, retain: false }, (error) => {
@@ -302,25 +289,42 @@ const waitForValidEmail = () => {
   });
 
 };
+//DATOS BIOMETRICOS...
+app.post('/user/register/face', async (req, res) => {
+  const userId = verificarToken(req.header('Authorization'));
+  if(userId===true){
+    return res.status(401).json({ mensaje: 'Token inválido.' });
+  } else if(userId === false){
+    return res.status(401).json({ mensaje: 'Acceso denegado. No se proporcionó un token.' });
+  }
+  
+  try{
 
-app.get("/status", (req, res) => {
   
-  let contra;
-  //TODO crear /register
-  bcrypt.hash(req.body.contrasenia, 10, (err, hashedPassword) => {
-    if (err) {
-      console.error('Error al hashear la contraseña:', err);
-    } else {
-      console.log('Contraseña hasheada:', hashedPassword);
-      contra = hashedPassword;
-    }
+  client.publish("/user/register/face", JSON.stringify(userId), { qos: 0, retain: false }, (error) => {
+      if (error) {
+        console.log(error)
+        console.error(error)
+      }
   });
-  
-  const status = {
-      Status: "Running"
-   };
-   
-   res.send(contra);
+  }catch (error){
+      console.error('Error:', error);
+      res.status(500).send('Error en el servidor');
+  }    
+
+});
+
+
+
+app.post("/dummy", (req, res) => {
+  const token = verificarToken(req.header('Authorization'));
+  if(token===true){
+    return res.status(401).json({ mensaje: 'Token inválido.' });
+  } else if(token === false){
+    return res.status(401).json({ mensaje: 'Acceso denegado. No se proporcionó un token.' });
+  }
+
+  res.send({"token": token});
 });
 
 //Espero el ID del recipiente que acabo de registrar. " app.post('/identificacion/recipiente') "
@@ -340,24 +344,31 @@ const waitForId = () => {
 //Inicia identificacion recipiente. PASO 1.
 //FLOW -> identificacion recipiente
 app.post('/identificacion/recipiente', async (req, res) => {
-    try {
+  const token = verificarToken(req.header('Authorization'));
+  if(token===true){
+    return res.status(401).json({ mensaje: 'Token inválido.' });
+  } else if(token === false){
+    return res.status(401).json({ mensaje: 'Acceso denegado. No se proporcionó un token.' });
+  }
+  
+  try {
       // Publicar el cuerpo en un topic MQTT
-      client.publish("/inicio/carga", JSON.stringify(req.body), { qos: 0, retain: false }, (error) => {
-        if (error) {
-          console.log(error)
-          console.error(error)
-        }
-      });
+    client.publish("/inicio/carga", JSON.stringify(req.body), { qos: 0, retain: false }, (error) => {
+      if (error) {
+        console.log(error)
+        console.error(error)
+      }
+    });
   
       // Esperar hasta recibir la respuesta del MQTT
-      const response = await waitForId();
+    const response = await waitForId();
   
       // Enviar la respuesta al cliente
-      res.status(200).json(response);
-    } catch (error) {
+    res.status(200).json(response);
+  } catch (error) {
       console.error('Error:', error);
       res.status(500).send('Error en el servidor');
-    }
+  }
 });
 
 
@@ -366,7 +377,15 @@ app.post('/identificacion/recipiente', async (req, res) => {
 //Toma 10 medidas, promedio es la altura del recipiente.
 //FLOW -> mugiwara
 app.post('/control/inicio', async (req, res) => {
-    try{
+  const token = verificarToken(req.header('Authorization'));
+  if(token===true){
+    return res.status(401).json({ mensaje: 'Token inválido.' });
+  } else if(token === false){
+    return res.status(401).json({ mensaje: 'Acceso denegado. No se proporcionó un token.' });
+  }  
+  
+  
+  try{
 
     
     client.publish("/control/inicio", JSON.stringify(req.body), { qos: 0, retain: false }, (error) => {
@@ -387,6 +406,13 @@ app.post('/control/inicio', async (req, res) => {
 //Inicia control. PASO 2.
 //recibe ID, radio, altura recipiente.  
 app.post('/test', async (req, res) => {
+  const token = verificarToken(req.header('Authorization'));
+  if(token===true){
+    return res.status(401).json({ mensaje: 'Token inválido.' });
+  } else if(token === false){
+    return res.status(401).json({ mensaje: 'Acceso denegado. No se proporcionó un token.' });
+  }
+  
   try{
 
   
@@ -429,20 +455,20 @@ client.on('message',function(topic, message, packet){
 
 
 //Verifico Token JWT. Para cada peticion.
-const verificarToken = (req, res, next) => {
-  const token = req.header('Authorization');
-
+const verificarToken = (token) => {
   if (!token) {
-    return res.status(401).json({ mensaje: 'Acceso denegado. No se proporcionó un token.' });
+    return false;
+    
   }
-
   // Eliminamos el prefijo "Bearer " del token
   const tokenSinBearer = token.replace('Bearer ', '');
 
   try {
     const datosToken = jwt.verify(tokenSinBearer, process.env.JWT_SECRET_KEY); //DEVUELVE ID Y DATE.
-    return datosToken;
+    console.log(datosToken);
+    return datosToken.userId;
   } catch (error) {
-    return res.status(401).json({ mensaje: 'Token inválido.' });
+    return true;
+    
   }
 };
